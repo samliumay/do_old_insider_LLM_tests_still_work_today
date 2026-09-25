@@ -1,0 +1,32 @@
+# Rust build output (the crate lives in a subfolder; this matches target/ at any depth).
+# Cargo.lock is committed: the crate is a binary and builds must be reproducible.
+target/
+**/*.rs.bk
+
+# Secrets: API keys live in .env, never in git. Keep a key-free .env.example.
+.env
+.env.*
+!.env.example
+
+# PostgreSQL in Docker: local data volume and dumps. The database is rebuilt from
+# migrations/ + benchmark + stored runs, so none of this is versioned.
+pgdata/
+*.dump
+*.sql.gz
+
+# Run outputs belong in ../results/ (exported from the database), not in this repo.
+out/
+*.log
+
+# Model weights
+*.safetensors
+*.gguf
+*.pt
+*.bin
+
+# Editors and OS
+.obsidian/workspace*
+.vscode/
+.idea/
+*.swp
+.DS_Store
