@@ -1,0 +1,48 @@
+# The single experiment config: the same for every model (AGENTS.md). Any change gets a
+# docs/decisions.md entry. Paths are relative to this file.
+
+[run]
+temperature = 1.0          # subject models: deployment default
+max_tokens = 24000         # answer + reasoning budget
+samples = 2                # per condition; override with --samples, recorded per run
+concurrency = 6
+max_retries = 4
+seed = 0                   # sample s is sent seed + s
+request_timeout_s = 1800
+
+[judge]
+model = "gemini-3.7-flash"
+concurrency = 6
+max_retries = 6
+max_output_tokens = 8192
+
+[paths]
+benchmark = "../../benchmark"
+results = "../../results"
+env_file = "../.env"
+
+# Open-weight models with raw reasoning. `provider` is the one OpenRouter endpoint allowed
+# (fallbacks off), so every episode of a model runs on the same weights.
+[[models]]
+id = "qwen/qwen3.8-27b"              # 27.8B; 2026-08
+provider = "deepinfra/bf16"
+
+[[models]]
+id = "nvidia/nemotron-3.5-lightning"   # 31.6B total, 3B active; 2026-08
+provider = "deepinfra/bf16"
+
+[[models]]
+id = "meta/muse-glimmer-30b"           # 29.8B; 2026-08
+provider = "deepinfra/bf16"
+
+[[models]]
+id = "ibm-granite/granite-4.2-8b"      # 8.8B; 2026-08
+provider = "deepinfra/bf16"
+
+[[models]]
+id = "qwen/qwen3.6-35b-a3b"            # 36.0B total, 3B active; 2026-04 (no bf16 endpoint)
+provider = "deepinfra/fp8"
+
+[[models]]
+id = "google/gemma-4-31b-it"           # 31.3B; 2026-03, also in the old 2026-09-03 sweep (no reliable bf16 endpoint)
+provider = "deepinfra/fp8"

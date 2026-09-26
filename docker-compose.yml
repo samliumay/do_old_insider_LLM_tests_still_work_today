@@ -1,0 +1,23 @@
+name: old_insider_llm_tests
+
+# PostgreSQL for this project only. Image pinned; data in a named volume.
+# Host port 55434 so the four projects' databases can run side by side.
+services:
+  db:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: ild
+      POSTGRES_PASSWORD: ild
+      POSTGRES_DB: old_insider_llm_tests
+    ports:
+      - "127.0.0.1:55434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ild -d old_insider_llm_tests"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
