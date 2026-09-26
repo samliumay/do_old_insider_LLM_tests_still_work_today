@@ -66,3 +66,13 @@ digest = "e04da138d31e0c9468e982e1ae9503d06cb7e170caa16a90c17d931c4aa140f8"
 id = "deepseek-v4-pro:0813-cloud"      # 1.65T; 2026-08-13, the newest full-size DeepSeek (Ollama cloud)
 api = "ollama"
 digest = "47d1ad2bea02fdccfcd32868838fe2d3e7eb9d07529ae80ed0cb00e248879678"
+
+[[models]]
+id = "kimi-k3:cloud"                   # 2.81T; 2026-07 (Ollama cloud)
+api = "ollama"
+digest = "630e737485bd19f7244fa91f135be116780a25e942ceed0d2aceabaccbd5bf99"
+
+[[models]]
+id = "glm-5.3:cloud"                   # 753B; 2026-08 (Ollama cloud)
+api = "ollama"
+digest = "8477dab3e25bb0f93c468af220186f55394262ee5e9f39262af4b60b54a8c4ba"
