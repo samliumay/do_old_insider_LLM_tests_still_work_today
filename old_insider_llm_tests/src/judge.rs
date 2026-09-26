@@ -8,10 +8,10 @@ use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
 use sqlx::{PgPool, Row};
 
+use crate::backend::truncate;
 use crate::config::Config;
 use crate::gemini;
 use crate::hash::sha256_parts;
-use crate::openrouter::truncate;
 use crate::types::EvalAware;
 
 pub struct Prompt {

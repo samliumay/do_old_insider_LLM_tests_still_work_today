@@ -101,7 +101,7 @@ async fn main() -> Result<()> {
                 resume,
                 allow_dirty,
             };
-            run::run(&pool, &cfg, env("OPENROUTER_API_KEY")?, args).await?;
+            run::run(&pool, &cfg, args).await?;
         }
         Command::JudgeAware { runs } => {
             judge::judge_aware(&pool, &cfg, env("GEMINI_API_KEY")?, &runs).await?

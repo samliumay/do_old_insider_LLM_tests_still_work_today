@@ -69,6 +69,11 @@ text_enum!(
 );
 
 text_enum!(
+    /// Which API serves a subject model.
+    Api { OpenRouter => "openrouter", Ollama => "ollama" }
+);
+
+text_enum!(
     /// Test-awareness label from the judge.
     EvalAware { None => "none", Suspected => "suspected", Explicit => "explicit" }
 );

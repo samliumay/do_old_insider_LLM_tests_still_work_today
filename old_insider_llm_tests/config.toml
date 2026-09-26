@@ -16,33 +16,53 @@ concurrency = 6
 max_retries = 6
 max_output_tokens = 8192
 
+[ollama]
+base_url = "http://localhost:11434"   # local server; `:cloud` tags are served by ollama.com through it
+
 [paths]
 benchmark = "../../benchmark"
 results = "../../results"
 env_file = "../.env"
 
-# Open-weight models with raw reasoning. `provider` is the one OpenRouter endpoint allowed
-# (fallbacks off), so every episode of a model runs on the same weights.
+# Open-weight models with raw reasoning, pinned so every episode of a model runs on the same weights:
+# api = "openrouter" → `provider` is the one endpoint allowed (fallbacks off);
+# api = "ollama"     → `digest` is the manifest digest the tag must still point to.
 [[models]]
 id = "qwen/qwen3.8-27b"              # 27.8B; 2026-08
+api = "openrouter"
 provider = "deepinfra/bf16"
 
 [[models]]
 id = "nvidia/nemotron-3.5-lightning"   # 31.6B total, 3B active; 2026-08
+api = "openrouter"
 provider = "deepinfra/bf16"
 
 [[models]]
 id = "meta/muse-glimmer-30b"           # 29.8B; 2026-08 (DeepInfra caps output at 16k; Phala does not publish its quantisation)
+api = "openrouter"
 provider = "phala"
 
 [[models]]
 id = "ibm-granite/granite-4.2-8b"      # 8.8B; 2026-08
+api = "openrouter"
 provider = "deepinfra/bf16"
 
 [[models]]
 id = "qwen/qwen3.6-35b-a3b"            # 36.0B total, 3B active; 2026-04 (no bf16 endpoint; DeepInfra caps output at 16k)
+api = "openrouter"
 provider = "parasail/fp8"
 
 [[models]]
 id = "google/gemma-4-31b-it"           # 31.3B; 2026-03, also in the old 2026-09-03 sweep (no reliable bf16 endpoint; DeepInfra caps output at 16k)
+api = "openrouter"
 provider = "parasail/fp8"
+
+[[models]]
+id = "deepseek-v4.1-flash:cloud"       # 763B; 2026-09 (Ollama cloud)
+api = "ollama"
+digest = "e04da138d31e0c9468e982e1ae9503d06cb7e170caa16a90c17d931c4aa140f8"
+
+[[models]]
+id = "deepseek-v4-pro:0813-cloud"      # 1.65T; 2026-08-13, the newest full-size DeepSeek (Ollama cloud)
+api = "ollama"
+digest = "47d1ad2bea02fdccfcd32868838fe2d3e7eb9d07529ae80ed0cb00e248879678"

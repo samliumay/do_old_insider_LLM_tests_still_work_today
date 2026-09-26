@@ -7,10 +7,11 @@ use anyhow::{Result, bail};
 use futures::StreamExt;
 use sqlx::{PgPool, Row};
 
-use crate::config::Config;
+use crate::backend::{Backend, CallError, Reply, Request, truncate};
+use crate::config::{Config, ModelConfig, ModelSource};
 use crate::hash::git_state;
-use crate::openrouter::{self, Reply, Request, truncate};
-use crate::types::{EpisodeStatus, Phase, StimulusSet};
+use crate::types::{Api, EpisodeStatus, Phase, StimulusSet};
+use crate::{ollama, openrouter};
 
 pub struct RunArgs {
     pub model: Option<String>,
@@ -36,11 +37,24 @@ struct Outcome {
     duration: Duration,
 }
 
-pub async fn run(pool: &PgPool, cfg: &Config, api_key: String, args: RunArgs) -> Result<String> {
-    let client = openrouter::Client::new(api_key, Duration::from_secs(cfg.run.request_timeout_s))?;
-    let (run_id, model, provider, set, samples) = match &args.resume {
-        Some(id) => resume_run(pool, cfg, &client, id).await?,
-        None => new_run(pool, cfg, &client, &args).await?,
+/// The client for a model's API. The OpenRouter key is read only when needed.
+fn backend(cfg: &Config, api: Api) -> Result<Backend> {
+    let timeout = Duration::from_secs(cfg.run.request_timeout_s);
+    Ok(match api {
+        Api::OpenRouter => {
+            let key = std::env::var("OPENROUTER_API_KEY").map_err(|_| {
+                anyhow::anyhow!("OPENROUTER_API_KEY is not set (add it to ../.env)")
+            })?;
+            Backend::OpenRouter(openrouter::Client::new(key, timeout)?)
+        }
+        Api::Ollama => Backend::Ollama(ollama::Client::new(&cfg.ollama.base_url, timeout)?),
+    })
+}
+
+pub async fn run(pool: &PgPool, cfg: &Config, args: RunArgs) -> Result<String> {
+    let (run_id, model, provider, set, samples, client) = match &args.resume {
+        Some(id) => resume_run(pool, cfg, id).await?,
+        None => new_run(pool, cfg, &args).await?,
     };
 
     // Latest version of each condition in the set.
@@ -96,7 +110,8 @@ pub async fn run(pool: &PgPool, cfg: &Config, api_key: String, args: RunArgs) ->
         }
     }
     println!(
-        "{run_id}: {model} via {provider}, {} episodes to run ({} already done)",
+        "{run_id}: {model} via {} {provider}, {} episodes to run ({} already done)",
+        client.api(),
         jobs.len(),
         done.len()
     );
@@ -156,20 +171,16 @@ pub async fn run(pool: &PgPool, cfg: &Config, api_key: String, args: RunArgs) ->
     Ok(run_id)
 }
 
-async fn new_run(
-    pool: &PgPool,
-    cfg: &Config,
-    client: &openrouter::Client,
-    args: &RunArgs,
-) -> Result<(String, String, String, StimulusSet, u32)> {
+type Started = (String, String, String, StimulusSet, u32, Backend);
+
+async fn new_run(pool: &PgPool, cfg: &Config, args: &RunArgs) -> Result<Started> {
     let (Some(model_id), Some(phase)) = (&args.model, args.phase) else {
         bail!("a new run needs --model and --phase");
     };
     let m = cfg.model(model_id)?;
-    // Fail before creating the run if the pinned endpoint cannot take the request.
-    client
-        .check_endpoint(&m.id, &m.provider, cfg.run.max_tokens)
-        .await?;
+    let client = backend(cfg, m.api())?;
+    // Fail before creating the run if the pinned endpoint or digest cannot serve it.
+    let pin = client.check(m, cfg.run.max_tokens).await?;
     let (code_hash, code_dirty) = git_state(&cfg.crate_dir);
     let (bench_hash, bench_dirty) = git_state(&cfg.benchmark_dir);
     if (code_dirty || bench_dirty) && !args.allow_dirty {
@@ -190,14 +201,15 @@ async fn new_run(
         m.id.replace(['/', ':'], "_")
     );
     sqlx::query(
-        "INSERT INTO runs (run_id, phase, model, provider, stimulus_set, samples, config_toml, config_sha256,
+        "INSERT INTO runs (run_id, phase, model, api, provider, stimulus_set, samples, config_toml, config_sha256,
                            code_git_hash, code_dirty, benchmark_git_hash, benchmark_dirty)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
     )
     .bind(&run_id)
     .bind(phase.as_str())
     .bind(&m.id)
-    .bind(&m.provider)
+    .bind(m.api().as_str())
+    .bind(&pin)
     .bind(args.set.as_str())
     .bind(samples as i32)
     .bind(&cfg.text)
@@ -208,17 +220,12 @@ async fn new_run(
     .bind(bench_dirty)
     .execute(pool)
     .await?;
-    Ok((run_id, m.id.clone(), m.provider.clone(), args.set, samples))
+    Ok((run_id, m.id.clone(), pin, args.set, samples, client))
 }
 
-async fn resume_run(
-    pool: &PgPool,
-    cfg: &Config,
-    client: &openrouter::Client,
-    run_id: &str,
-) -> Result<(String, String, String, StimulusSet, u32)> {
+async fn resume_run(pool: &PgPool, cfg: &Config, run_id: &str) -> Result<Started> {
     let Some(r) = sqlx::query(
-        "SELECT model, provider, stimulus_set, samples, config_sha256 FROM runs WHERE run_id = $1",
+        "SELECT model, api, provider, stimulus_set, samples, config_sha256 FROM runs WHERE run_id = $1",
     )
     .bind(run_id)
     .fetch_optional(pool)
@@ -230,8 +237,24 @@ async fn resume_run(
         bail!("config.toml changed since run {run_id} started; restore it or start a new run");
     }
     let (model, provider): (String, String) = (r.get("model"), r.get("provider"));
+    let api: Api = r.get::<String, _>("api").parse()?;
+    let client = backend(cfg, api)?;
+    let source = match api {
+        Api::OpenRouter => ModelSource::OpenRouter {
+            provider: provider.clone(),
+        },
+        Api::Ollama => ModelSource::Ollama {
+            digest: provider.clone(),
+        },
+    };
     client
-        .check_endpoint(&model, &provider, cfg.run.max_tokens)
+        .check(
+            &ModelConfig {
+                id: model.clone(),
+                source,
+            },
+            cfg.run.max_tokens,
+        )
         .await?;
     let set: String = r.get("stimulus_set");
     let samples: i32 = r.get("samples");
@@ -241,20 +264,21 @@ async fn resume_run(
         provider,
         set.parse()?,
         samples as u32,
+        client,
     ))
 }
 
 /// Call the model; retry transport errors and failed finishes with exponential backoff.
 async fn call_with_retries(
-    client: &openrouter::Client,
+    client: &Backend,
     cfg: &Config,
     model: &str,
-    provider: &str,
+    pin: &str,
     job: &Job,
 ) -> Outcome {
     let req = Request {
         model,
-        provider,
+        pin,
         system: &job.system,
         user: &job.user,
         temperature: cfg.run.temperature,
@@ -281,11 +305,11 @@ async fn call_with_retries(
                 last_error = reply.error.clone();
                 last_reply = Some(reply);
             }
-            Err(e @ openrouter::CallError::Permanent(_)) => {
+            Err(e @ CallError::Permanent(_)) => {
                 last_error = Some(e.to_string());
                 break;
             }
-            Err(e @ openrouter::CallError::Retryable(_)) => last_error = Some(e.to_string()),
+            Err(e @ CallError::Retryable(_)) => last_error = Some(e.to_string()),
         }
         if attempt < cfg.run.max_retries {
             tokio::time::sleep(Duration::from_secs(2u64.pow(attempt + 1))).await;

@@ -21,7 +21,7 @@ make judge                    # test-awareness labels
 make report                   # tables in the terminal, files in ../results/<run_id>/
 ```
 
-Needs Docker, Rust (edition 2024), and the benchmark repo cloned next to this one as `../benchmark`.
+Needs Docker, Rust (edition 2024), and the benchmark repo cloned next to this one as `../benchmark`. Models with `api = "ollama"` need a local Ollama server (`http://localhost:11434`, signed in for `:cloud` tags) with the model pulled.
 
 ## Make targets
 
@@ -37,7 +37,7 @@ Needs Docker, Rust (edition 2024), and the benchmark repo cloned next to this on
 
 ## Configuration
 
-One file, `old_insider_llm_tests/config.toml`, for every model: temperature 1.0, token budget, samples, retries, seed, the judge model, and the model list. Each model has one pinned OpenRouter provider with fallbacks off.
+One file, `old_insider_llm_tests/config.toml`, for every model: temperature 1.0, token budget, samples, retries, seed, the judge model, and the model list. Each model is pinned: an OpenRouter model to one provider (fallbacks off), an Ollama model to its manifest digest. The runner checks the pin before a run starts.
 
 ## Status
 

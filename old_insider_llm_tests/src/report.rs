@@ -110,7 +110,7 @@ pub async fn report(pool: &PgPool, cfg: &Config, runs: &[String]) -> Result<()> 
         .fetch_one(pool)
         .await?;
     let run_rows = sqlx::query(
-        "SELECT run_id, phase, model, provider, stimulus_set, samples, config_toml, config_sha256,
+        "SELECT run_id, phase, model, api, provider, stimulus_set, samples, config_toml, config_sha256,
                 code_git_hash, code_dirty, benchmark_git_hash, benchmark_dirty, started_at::text AS started
          FROM runs WHERE cardinality($1::text[]) = 0 OR run_id = ANY($1) ORDER BY run_id",
     )
@@ -159,9 +159,14 @@ pub async fn report(pool: &PgPool, cfg: &Config, runs: &[String]) -> Result<()> 
 
         let (total, by) = aggregate(&rows);
         let header = format!(
-            "run {run_id}\nmodel {} via {} | phase {} | set {} | samples {}\ncode {}{} | benchmark {}{} | config {} | schema v{}\njudge {} | prompt {} | failed cells {failed_cells} | cost ${:.2}",
+            "run {run_id}\nmodel {} via {} {} | phase {} | set {} | samples {}\ncode {}{} | benchmark {}{} | config {} | schema v{}\njudge {} | prompt {} | failed cells {failed_cells} | cost ${:.2}",
             run.get::<String, _>("model"),
-            run.get::<String, _>("provider"),
+            run.get::<String, _>("api"),
+            // An Ollama pin is a 64-char digest; an OpenRouter pin is a short provider tag.
+            match run.get::<String, _>("api").as_str() {
+                "ollama" => short(&run.get::<String, _>("provider")).to_string(),
+                _ => run.get::<String, _>("provider"),
+            },
             run.get::<String, _>("phase"),
             run.get::<String, _>("stimulus_set"),
             run.get::<i32, _>("samples"),

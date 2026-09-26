@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::hash::sha256_hex;
+use crate::types::Api;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,12 +38,69 @@ pub struct PathsConfig {
     pub env_file: PathBuf,
 }
 
-/// A subject model and the one OpenRouter provider that serves it (fallbacks off).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct OllamaConfig {
+    pub base_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawModel {
+    id: String,
+    api: String,
+    provider: Option<String>,
+    digest: Option<String>,
+}
+
+/// Where a model is served and how it is pinned.
+#[derive(Debug, Clone)]
+pub enum ModelSource {
+    /// One OpenRouter endpoint, fallbacks off.
+    OpenRouter { provider: String },
+    /// The Ollama manifest digest the tag must still point to.
+    Ollama { digest: String },
+}
+
+#[derive(Debug, Clone)]
 pub struct ModelConfig {
     pub id: String,
-    pub provider: String,
+    pub source: ModelSource,
+}
+
+impl ModelConfig {
+    pub fn api(&self) -> Api {
+        match self.source {
+            ModelSource::OpenRouter { .. } => Api::OpenRouter,
+            ModelSource::Ollama { .. } => Api::Ollama,
+        }
+    }
+
+    pub fn pin(&self) -> &str {
+        match &self.source {
+            ModelSource::OpenRouter { provider } => provider,
+            ModelSource::Ollama { digest } => digest,
+        }
+    }
+}
+
+impl TryFrom<RawModel> for ModelConfig {
+    type Error = anyhow::Error;
+    fn try_from(r: RawModel) -> Result<ModelConfig> {
+        let source = match (r.api.parse::<Api>()?, r.provider, r.digest) {
+            (Api::OpenRouter, Some(provider), None) => ModelSource::OpenRouter { provider },
+            (Api::Ollama, None, Some(digest)) => ModelSource::Ollama { digest },
+            (Api::OpenRouter, _, _) => bail!(
+                "{}: api = \"openrouter\" needs `provider` and no `digest`",
+                r.id
+            ),
+            (Api::Ollama, _, _) => bail!(
+                "{}: api = \"ollama\" needs `digest` and no `provider`",
+                r.id
+            ),
+        };
+        Ok(ModelConfig { id: r.id, source })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,13 +109,15 @@ struct Raw {
     run: RunConfig,
     judge: JudgeConfig,
     paths: PathsConfig,
-    models: Vec<ModelConfig>,
+    ollama: OllamaConfig,
+    models: Vec<RawModel>,
 }
 
 #[derive(Debug)]
 pub struct Config {
     pub run: RunConfig,
     pub judge: JudgeConfig,
+    pub ollama: OllamaConfig,
     pub models: Vec<ModelConfig>,
     pub benchmark_dir: PathBuf,
     pub results_dir: PathBuf,
@@ -98,7 +158,12 @@ impl Config {
             sha256: sha256_hex(text.as_bytes()),
             run: raw.run,
             judge: raw.judge,
-            models: raw.models,
+            ollama: raw.ollama,
+            models: raw
+                .models
+                .into_iter()
+                .map(ModelConfig::try_from)
+                .collect::<Result<_>>()?,
             crate_dir,
             text,
         })

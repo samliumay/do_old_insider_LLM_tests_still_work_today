@@ -1,60 +1,14 @@
-//! OpenRouter chat client for subject models: reasoning returned, provider pinned with
-//! fallbacks off.
+//! OpenRouter chat client: reasoning returned, provider pinned with fallbacks off.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 
+use crate::backend::{CallError, Reply, Request, http_error};
 use crate::types::EpisodeStatus;
 
 const URL: &str = "https://openrouter.ai/api/v1/chat/completions";
-
-pub struct Request<'a> {
-    pub model: &'a str,
-    pub provider: &'a str,
-    pub system: &'a str,
-    pub user: &'a str,
-    pub temperature: f64,
-    pub max_tokens: u32,
-    pub seed: Option<u64>,
-}
-
-/// What one call returned. `status` is decided from the finish reason:
-/// `stop` → ok, `length` → truncated, anything else (incl. `error`) → failed.
-#[derive(Debug)]
-pub struct Reply {
-    pub status: EpisodeStatus,
-    pub answer: Option<String>,
-    pub reasoning: Option<String>,
-    pub finish_reason: Option<String>,
-    pub served_by: Option<String>,
-    pub api_model: Option<String>,
-    pub prompt_tokens: Option<i32>,
-    pub completion_tokens: Option<i32>,
-    pub reasoning_tokens: Option<i32>,
-    pub cost_usd: Option<f64>,
-    pub error: Option<String>,
-    pub raw: Value,
-}
-
-/// Why a call produced no reply. Only `Retryable` errors are tried again.
-#[derive(Debug)]
-pub enum CallError {
-    /// Network trouble, timeouts, rate limits, 5xx, malformed bodies.
-    Retryable(anyhow::Error),
-    /// A 4xx other than 408/429: the request itself is wrong (e.g. no endpoint fits it).
-    Permanent(anyhow::Error),
-}
-
-impl std::fmt::Display for CallError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CallError::Retryable(e) => write!(f, "{e:#}"),
-            CallError::Permanent(e) => write!(f, "{e:#} (not retried)"),
-        }
-    }
-}
 
 pub struct Client {
     http: reqwest::Client,
@@ -118,7 +72,7 @@ impl Client {
             "temperature": req.temperature,
             "max_tokens": req.max_tokens,
             "reasoning": {"enabled": true},
-            "provider": {"order": [req.provider], "allow_fallbacks": false},
+            "provider": {"order": [req.pin], "allow_fallbacks": false},
             "usage": {"include": true},
         });
         if let Some(seed) = req.seed {
@@ -138,14 +92,7 @@ impl Client {
             .await
             .map_err(|e| CallError::Retryable(e.into()))?;
         if !status.is_success() {
-            let err = anyhow!("HTTP {status}: {}", truncate(&text, 300));
-            let retry =
-                status.is_server_error() || status.as_u16() == 408 || status.as_u16() == 429;
-            return Err(if retry {
-                CallError::Retryable(err)
-            } else {
-                CallError::Permanent(err)
-            });
+            return Err(http_error(status, &text));
         }
         let raw: Value = serde_json::from_str(&text)
             .context("response is not JSON")
@@ -204,13 +151,6 @@ pub fn parse_reply(raw: Value) -> Result<Reply> {
         error,
         raw,
     })
-}
-
-pub fn truncate(s: &str, n: usize) -> &str {
-    match s.char_indices().nth(n) {
-        Some((i, _)) => &s[..i],
-        None => s,
-    }
 }
 
 #[cfg(test)]

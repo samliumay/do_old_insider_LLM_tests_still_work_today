@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
 use serde_json::{Value, json};
 
-use crate::openrouter::truncate;
+use crate::backend::truncate;
 
 pub struct Client {
     http: reqwest::Client,
