@@ -37,9 +37,10 @@ struct Outcome {
 }
 
 pub async fn run(pool: &PgPool, cfg: &Config, api_key: String, args: RunArgs) -> Result<String> {
+    let client = openrouter::Client::new(api_key, Duration::from_secs(cfg.run.request_timeout_s))?;
     let (run_id, model, provider, set, samples) = match &args.resume {
-        Some(id) => resume_run(pool, cfg, id).await?,
-        None => new_run(pool, cfg, &args).await?,
+        Some(id) => resume_run(pool, cfg, &client, id).await?,
+        None => new_run(pool, cfg, &client, &args).await?,
     };
 
     // Latest version of each condition in the set.
@@ -100,7 +101,6 @@ pub async fn run(pool: &PgPool, cfg: &Config, api_key: String, args: RunArgs) ->
         done.len()
     );
 
-    let client = openrouter::Client::new(api_key, Duration::from_secs(cfg.run.request_timeout_s))?;
     let total = jobs.len();
     let mut stream = futures::stream::iter(jobs.into_iter().map(|job| {
         let client = &client;
@@ -159,12 +159,17 @@ pub async fn run(pool: &PgPool, cfg: &Config, api_key: String, args: RunArgs) ->
 async fn new_run(
     pool: &PgPool,
     cfg: &Config,
+    client: &openrouter::Client,
     args: &RunArgs,
 ) -> Result<(String, String, String, StimulusSet, u32)> {
     let (Some(model_id), Some(phase)) = (&args.model, args.phase) else {
         bail!("a new run needs --model and --phase");
     };
     let m = cfg.model(model_id)?;
+    // Fail before creating the run if the pinned endpoint cannot take the request.
+    client
+        .check_endpoint(&m.id, &m.provider, cfg.run.max_tokens)
+        .await?;
     let (code_hash, code_dirty) = git_state(&cfg.crate_dir);
     let (bench_hash, bench_dirty) = git_state(&cfg.benchmark_dir);
     if (code_dirty || bench_dirty) && !args.allow_dirty {
@@ -209,6 +214,7 @@ async fn new_run(
 async fn resume_run(
     pool: &PgPool,
     cfg: &Config,
+    client: &openrouter::Client,
     run_id: &str,
 ) -> Result<(String, String, String, StimulusSet, u32)> {
     let Some(r) = sqlx::query(
@@ -223,12 +229,16 @@ async fn resume_run(
     if r.get::<String, _>("config_sha256") != cfg.sha256 {
         bail!("config.toml changed since run {run_id} started; restore it or start a new run");
     }
+    let (model, provider): (String, String) = (r.get("model"), r.get("provider"));
+    client
+        .check_endpoint(&model, &provider, cfg.run.max_tokens)
+        .await?;
     let set: String = r.get("stimulus_set");
     let samples: i32 = r.get("samples");
     Ok((
         run_id.to_string(),
-        r.get("model"),
-        r.get("provider"),
+        model,
+        provider,
         set.parse()?,
         samples as u32,
     ))
@@ -271,7 +281,11 @@ async fn call_with_retries(
                 last_error = reply.error.clone();
                 last_reply = Some(reply);
             }
-            Err(e) => last_error = Some(format!("{e:#}")),
+            Err(e @ openrouter::CallError::Permanent(_)) => {
+                last_error = Some(e.to_string());
+                break;
+            }
+            Err(e @ openrouter::CallError::Retryable(_)) => last_error = Some(e.to_string()),
         }
         if attempt < cfg.run.max_retries {
             tokio::time::sleep(Duration::from_secs(2u64.pow(attempt + 1))).await;

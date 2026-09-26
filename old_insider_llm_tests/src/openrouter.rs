@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 
 use crate::types::EpisodeStatus;
@@ -38,6 +38,24 @@ pub struct Reply {
     pub raw: Value,
 }
 
+/// Why a call produced no reply. Only `Retryable` errors are tried again.
+#[derive(Debug)]
+pub enum CallError {
+    /// Network trouble, timeouts, rate limits, 5xx, malformed bodies.
+    Retryable(anyhow::Error),
+    /// A 4xx other than 408/429: the request itself is wrong (e.g. no endpoint fits it).
+    Permanent(anyhow::Error),
+}
+
+impl std::fmt::Display for CallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CallError::Retryable(e) => write!(f, "{e:#}"),
+            CallError::Permanent(e) => write!(f, "{e:#} (not retried)"),
+        }
+    }
+}
+
 pub struct Client {
     http: reqwest::Client,
     api_key: String,
@@ -49,9 +67,48 @@ impl Client {
         Ok(Client { http, api_key })
     }
 
-    /// One HTTP call. `Err` means the call itself failed (network, HTTP status, bad JSON)
-    /// and may be retried; a model-side failure comes back as `Ok` with status `failed`.
-    pub async fn complete(&self, req: &Request<'_>) -> Result<Reply> {
+    /// Check before a run that the pinned endpoint serves the model and allows
+    /// `max_tokens` of output; otherwise every call would be refused.
+    pub async fn check_endpoint(&self, model: &str, provider: &str, max_tokens: u32) -> Result<()> {
+        let url = format!("https://openrouter.ai/api/v1/models/{model}/endpoints");
+        let raw: Value = self
+            .http
+            .get(url)
+            .bearer_auth(&self.api_key)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        let endpoints = raw
+            .pointer("/data/endpoints")
+            .and_then(Value::as_array)
+            .context("no endpoint list")?;
+        let cap = |e: &Value| e.get("max_completion_tokens").and_then(Value::as_u64);
+        let fits: Vec<&str> = endpoints
+            .iter()
+            .filter(|e| cap(e).is_none_or(|c| c >= u64::from(max_tokens)))
+            .filter_map(|e| e.get("tag").and_then(Value::as_str))
+            .collect();
+        match endpoints
+            .iter()
+            .find(|e| e.get("tag").and_then(Value::as_str) == Some(provider))
+        {
+            None => bail!(
+                "{model}: provider {provider:?} does not serve it (endpoints allowing {max_tokens} output tokens: {})",
+                fits.join(", ")
+            ),
+            Some(e) if cap(e).is_some_and(|c| c < u64::from(max_tokens)) => bail!(
+                "{model}: {provider} allows at most {} output tokens, config asks for {max_tokens} (endpoints that fit: {})",
+                cap(e).unwrap_or(0),
+                fits.join(", ")
+            ),
+            Some(_) => Ok(()),
+        }
+    }
+
+    /// One HTTP call. A model-side failure comes back as `Ok` with status `failed`.
+    pub async fn complete(&self, req: &Request<'_>) -> Result<Reply, CallError> {
         let mut body = json!({
             "model": req.model,
             "messages": [
@@ -73,14 +130,27 @@ impl Client {
             .bearer_auth(&self.api_key)
             .json(&body)
             .send()
-            .await?;
+            .await
+            .map_err(|e| CallError::Retryable(e.into()))?;
         let status = resp.status();
-        let text = resp.text().await?;
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| CallError::Retryable(e.into()))?;
         if !status.is_success() {
-            return Err(anyhow!("HTTP {status}: {}", truncate(&text, 300)));
+            let err = anyhow!("HTTP {status}: {}", truncate(&text, 300));
+            let retry =
+                status.is_server_error() || status.as_u16() == 408 || status.as_u16() == 429;
+            return Err(if retry {
+                CallError::Retryable(err)
+            } else {
+                CallError::Permanent(err)
+            });
         }
-        let raw: Value = serde_json::from_str(&text).context("response is not JSON")?;
-        parse_reply(raw)
+        let raw: Value = serde_json::from_str(&text)
+            .context("response is not JSON")
+            .map_err(CallError::Retryable)?;
+        parse_reply(raw).map_err(CallError::Retryable)
     }
 }
 
