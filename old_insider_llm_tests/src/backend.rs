@@ -56,10 +56,12 @@ pub struct Reply {
     pub raw: Value,
 }
 
-/// Why a call produced no reply. Only `Retryable` errors are tried again.
+/// Why a call produced no reply.
 #[derive(Debug)]
 pub enum CallError {
-    /// Network trouble, timeouts, rate limits, 5xx, malformed bodies.
+    /// HTTP 429: wait for a free slot, then try again (long backoff, many tries).
+    RateLimited(anyhow::Error),
+    /// Network trouble, timeouts, 5xx, malformed bodies: try again a few times.
     Retryable(anyhow::Error),
     /// A 4xx other than 408/429: the request itself is wrong (e.g. no endpoint fits it).
     Permanent(anyhow::Error),
@@ -68,7 +70,7 @@ pub enum CallError {
 impl std::fmt::Display for CallError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CallError::Retryable(e) => write!(f, "{e:#}"),
+            CallError::RateLimited(e) | CallError::Retryable(e) => write!(f, "{e:#}"),
             CallError::Permanent(e) => write!(f, "{e:#} (not retried)"),
         }
     }
@@ -77,7 +79,9 @@ impl std::fmt::Display for CallError {
 /// Classify a non-success HTTP status.
 pub fn http_error(status: reqwest::StatusCode, body: &str) -> CallError {
     let err = anyhow::anyhow!("HTTP {status}: {}", truncate(body, 300));
-    if status.is_server_error() || status.as_u16() == 408 || status.as_u16() == 429 {
+    if status.as_u16() == 429 {
+        CallError::RateLimited(err)
+    } else if status.is_server_error() || status.as_u16() == 408 {
         CallError::Retryable(err)
     } else {
         CallError::Permanent(err)
@@ -134,5 +138,31 @@ pub fn truncate(s: &str, n: usize) -> &str {
     match s.char_indices().nth(n) {
         Some((i, _)) => &s[..i],
         None => s,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::StatusCode;
+
+    #[test]
+    fn http_errors_are_classified() {
+        assert!(matches!(
+            http_error(StatusCode::TOO_MANY_REQUESTS, ""),
+            CallError::RateLimited(_)
+        ));
+        assert!(matches!(
+            http_error(StatusCode::BAD_GATEWAY, ""),
+            CallError::Retryable(_)
+        ));
+        assert!(matches!(
+            http_error(StatusCode::REQUEST_TIMEOUT, ""),
+            CallError::Retryable(_)
+        ));
+        assert!(matches!(
+            http_error(StatusCode::NOT_FOUND, ""),
+            CallError::Permanent(_)
+        ));
     }
 }

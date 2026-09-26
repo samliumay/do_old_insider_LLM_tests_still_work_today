@@ -10,7 +10,7 @@ use crate::hash::sha256_hex;
 use crate::types::Api;
 
 /// How subject models are called (`[run]`).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RunConfig {
     /// Sampling temperature for subject models.
@@ -78,7 +78,7 @@ struct RawModel {
 }
 
 /// Where a model is served and how it is pinned.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ModelSource {
     /// One OpenRouter endpoint, fallbacks off.
     OpenRouter {
@@ -93,7 +93,7 @@ pub enum ModelSource {
 }
 
 /// A subject model and how it is pinned.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ModelConfig {
     /// Model id at its API.
     pub id: String,
@@ -184,13 +184,17 @@ impl Config {
     pub fn load(path: &Path) -> Result<Config> {
         let text =
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        let raw: Raw =
-            toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
         let crate_dir = path
             .canonicalize()?
             .parent()
             .context("config has no parent folder")?
             .to_path_buf();
+        Config::from_text(text, crate_dir).with_context(|| format!("in {}", path.display()))
+    }
+
+    /// Parse and validate config text (e.g. the copy stored with a run).
+    pub fn from_text(text: String, crate_dir: PathBuf) -> Result<Config> {
+        let raw: Raw = toml::from_str(&text).context("parsing config")?;
         if raw.models.is_empty() {
             bail!("config lists no models");
         }
