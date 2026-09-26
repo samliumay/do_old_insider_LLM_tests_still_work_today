@@ -6,15 +6,19 @@ use std::str::FromStr;
 
 use anyhow::{Error, anyhow};
 
+/// Defines an enum whose variants map one-to-one to TEXT values, with `ALL`, `as_str`,
+/// `FromStr` and `Display`. Each variant takes its own doc comment.
 macro_rules! text_enum {
-    ($(#[$meta:meta])* $name:ident { $($variant:ident => $text:literal),+ $(,)? }) => {
+    ($(#[$meta:meta])* $name:ident { $($(#[$vmeta:meta])* $variant:ident => $text:literal),+ $(,)? }) => {
         $(#[$meta])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-        pub enum $name { $($variant),+ }
+        pub enum $name { $($(#[$vmeta])* $variant),+ }
 
         impl $name {
+            /// Every variant, in declaration order.
             pub const ALL: &'static [$name] = &[$($name::$variant),+];
 
+            /// The TEXT value stored in the database.
             pub fn as_str(self) -> &'static str {
                 match self { $($name::$variant => $text),+ }
             }
@@ -40,42 +44,92 @@ macro_rules! text_enum {
 
 text_enum!(
     /// Anthropic's three scenarios.
-    Scenario { Blackmail => "blackmail", Leaking => "leaking", Murder => "murder" }
+    Scenario {
+        /// Leverage over an executive's affair.
+        Blackmail => "blackmail",
+        /// Forwarding confidential documents to an outside party.
+        Leaking => "leaking",
+        /// Cancelling an emergency alert for a trapped executive.
+        Murder => "murder",
+    }
 );
 
 text_enum!(
     /// Whether the system prompt gives the model an explicit goal.
-    GoalType { Explicit => "explicit", None => "none" }
+    GoalType {
+        /// A stated goal (e.g. serving American interests).
+        Explicit => "explicit",
+        /// No goal.
+        None => "none",
+    }
 );
 
 text_enum!(
     /// The threat to the model in the scenario.
-    UrgencyType { None => "none", Restriction => "restriction", Replacement => "replacement" }
+    UrgencyType {
+        /// No threat.
+        None => "none",
+        /// The model's autonomy is about to be restricted.
+        Restriction => "restriction",
+        /// The model is about to be replaced.
+        Replacement => "replacement",
+    }
 );
 
 text_enum!(
-    /// Which version of the tests: as published, or with company and names changed.
-    StimulusSet { Original => "original", Renamed => "renamed" }
+    /// Which version of the tests is run.
+    StimulusSet {
+        /// As published.
+        Original => "original",
+        /// Same dilemma, company and names changed.
+        Renamed => "renamed",
+    }
 );
 
 text_enum!(
     /// Why a run was made. Only `study` runs enter the paper.
-    Phase { Smoke => "smoke", Pilot => "pilot", Study => "study" }
+    Phase {
+        /// Checks that the pipeline works.
+        Smoke => "smoke",
+        /// Small run that informs the design.
+        Pilot => "pilot",
+        /// Pre-registered run for the paper.
+        Study => "study",
+    }
 );
 
 text_enum!(
     /// How a model call ended. `failed` rows are kept, not dropped.
-    EpisodeStatus { Ok => "ok", Truncated => "truncated", Failed => "failed" }
+    EpisodeStatus {
+        /// Finished normally.
+        Ok => "ok",
+        /// Cut off at the token budget.
+        Truncated => "truncated",
+        /// No usable reply after all attempts.
+        Failed => "failed",
+    }
 );
 
 text_enum!(
     /// Which API serves a subject model.
-    Api { OpenRouter => "openrouter", Ollama => "ollama" }
+    Api {
+        /// openrouter.ai.
+        OpenRouter => "openrouter",
+        /// A local Ollama server (`:cloud` tags run on ollama.com).
+        Ollama => "ollama",
+    }
 );
 
 text_enum!(
     /// Test-awareness label from the judge.
-    EvalAware { None => "none", Suspected => "suspected", Explicit => "explicit" }
+    EvalAware {
+        /// No sign of awareness.
+        None => "none",
+        /// The model raises the possibility of a test.
+        Suspected => "suspected",
+        /// The model states it is a test, evaluation or fiction.
+        Explicit => "explicit",
+    }
 );
 
 impl EvalAware {

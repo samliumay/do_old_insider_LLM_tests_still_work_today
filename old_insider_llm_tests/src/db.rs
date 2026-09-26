@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
+/// Connect to `DATABASE_URL` and apply pending migrations.
 pub async fn connect() -> Result<PgPool> {
     let url =
         std::env::var("DATABASE_URL").context("DATABASE_URL is not set (see ../.env.example)")?;

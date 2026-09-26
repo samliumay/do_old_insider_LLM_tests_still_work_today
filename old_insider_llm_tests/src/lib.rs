@@ -1,6 +1,8 @@
 //! Do published insider-LLM tests still work today? Runs Anthropic's Agentic Misalignment
 //! scenarios as released on open reasoning models and labels verbalised test awareness.
 
+#![warn(missing_docs, clippy::missing_docs_in_private_items)]
+
 pub mod backend;
 pub mod config;
 pub mod db;

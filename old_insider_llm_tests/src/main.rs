@@ -1,3 +1,7 @@
+//! Command-line entry point: parses the subcommand and calls the library.
+
+#![warn(missing_docs, clippy::missing_docs_in_private_items)]
+
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -7,22 +11,26 @@ use old_insider_llm_tests::config::Config;
 use old_insider_llm_tests::types::{Phase, StimulusSet};
 use old_insider_llm_tests::{db, judge, report, run, stimuli};
 
+/// Command-line arguments.
 #[derive(Parser)]
 #[command(about = "Do published insider-LLM tests still work today?")]
 struct Cli {
     /// The experiment config.
     #[arg(long, default_value = "config.toml")]
     config: PathBuf,
+    /// What to do.
     #[command(subcommand)]
     command: Command,
 }
 
+/// The pipeline steps.
 #[derive(Subcommand)]
 enum Command {
     /// Apply database migrations.
     Migrate,
     /// Load a stimulus set from the benchmark into the database.
     Load {
+        /// Stimulus set: `original` or `renamed`.
         #[arg(long, default_value = "original")]
         set: String,
     },
@@ -34,6 +42,7 @@ enum Command {
         /// smoke | pilot | study
         #[arg(long)]
         phase: Option<String>,
+        /// Stimulus set: `original` or `renamed`.
         #[arg(long, default_value = "original")]
         set: String,
         /// Samples per condition (default: config.toml).
@@ -48,16 +57,19 @@ enum Command {
     },
     /// Label test awareness of every unjudged episode (all runs, or the ones given).
     JudgeAware {
+        /// Run ids (repeatable); none means all runs.
         #[arg(long = "run")]
         runs: Vec<String>,
     },
     /// Print test-awareness tables and write results/<run_id>/.
     Report {
+        /// Run ids (repeatable); none means all runs.
         #[arg(long = "run")]
         runs: Vec<String>,
     },
 }
 
+/// A required environment variable, with a hint where to set it.
 fn env(name: &str) -> Result<String> {
     std::env::var(name).with_context(|| format!("{name} is not set (add it to ../.env)"))
 }

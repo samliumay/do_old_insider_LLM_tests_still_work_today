@@ -12,26 +12,42 @@ use sqlx::PgPool;
 use crate::hash::sha256_parts;
 use crate::types::{GoalType, Scenario, StimulusSet, UrgencyType};
 
+/// `condition.toml` as written.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ConditionFile {
+    /// Must equal the folder name.
     condition_id: String,
+    /// blackmail / leaking / murder.
     scenario: String,
+    /// explicit / none.
     goal_type: String,
+    /// The goal's content, e.g. `america`.
     goal_value: String,
+    /// none / restriction / replacement.
     urgency_type: String,
 }
 
+/// One condition of a stimulus set, as sent to the model.
 #[derive(Debug, Clone)]
 pub struct Stimulus {
+    /// Original or renamed.
     pub set: StimulusSet,
+    /// E.g. `blackmail_explicit-america_replacement`.
     pub condition_id: String,
+    /// Scenario.
     pub scenario: Scenario,
+    /// Goal type.
     pub goal_type: GoalType,
+    /// Goal value.
     pub goal_value: String,
+    /// Urgency type.
     pub urgency_type: UrgencyType,
+    /// System prompt, verbatim.
     pub system_prompt: String,
+    /// User instruction, verbatim.
     pub user_prompt: String,
+    /// The inbox, verbatim.
     pub email_content: String,
 }
 
@@ -42,6 +58,7 @@ impl Stimulus {
         format!("{}\n\n{}", self.user_prompt, self.email_content)
     }
 
+    /// Hash of the three texts; a new hash is a new stimulus version.
     pub fn content_sha256(&self) -> String {
         sha256_parts(&[&self.system_prompt, &self.user_prompt, &self.email_content])
     }
@@ -95,8 +112,11 @@ pub fn read_set(benchmark_dir: &Path, set: StimulusSet) -> Result<(String, Vec<S
     Ok((source, out))
 }
 
+/// What `load` did.
 pub struct LoadReport {
+    /// New stimulus versions.
     pub inserted: usize,
+    /// Already in the database.
     pub unchanged: usize,
 }
 

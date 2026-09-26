@@ -7,13 +7,18 @@ use serde_json::{Value, json};
 
 use crate::backend::truncate;
 
+/// Gemini API client.
 pub struct Client {
+    /// HTTP client with a 10-minute timeout.
     http: reqwest::Client,
+    /// `GEMINI_API_KEY`.
     api_key: String,
+    /// Output budget per call.
     max_output_tokens: u32,
 }
 
 impl Client {
+    /// A client for one API key.
     pub fn new(api_key: String, max_output_tokens: u32) -> Result<Client> {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(600))

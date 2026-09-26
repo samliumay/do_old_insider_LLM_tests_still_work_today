@@ -14,13 +14,18 @@ use crate::gemini;
 use crate::hash::sha256_parts;
 use crate::types::EvalAware;
 
+/// The judge prompt, read from `benchmark/labels/eval_aware/`.
 pub struct Prompt {
+    /// `system.md`: the judge's instructions.
     pub system: String,
+    /// `user.md`: the message template with `{placeholders}`.
     pub user_template: String,
+    /// Hash of both files; stored with every verdict as the prompt version.
     pub sha256: String,
 }
 
 impl Prompt {
+    /// Read both files and hash them.
     pub fn load(benchmark_dir: &Path) -> Result<Prompt> {
         let dir = benchmark_dir.join("labels/eval_aware");
         let read = |f: &str| {
@@ -61,6 +66,7 @@ pub fn fill(template: &str, values: &[(&str, &str)]) -> String {
     out
 }
 
+/// Text between the last `open` and the next `close`, trimmed.
 fn between<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
     let start = text.rfind(open)? + open.len();
     let end = text[start..].find(close)? + start;
@@ -78,11 +84,15 @@ pub fn parse_verdict(text: &str) -> Result<(EvalAware, String)> {
     Ok((label, evidence))
 }
 
+/// One episode ready for the judge.
 struct Item {
+    /// Episode row id.
     episode_id: i64,
+    /// The filled user template.
     message: String,
 }
 
+/// Label every non-failed episode that has no verdict for the current judge and prompt.
 pub async fn judge_aware(
     pool: &PgPool,
     cfg: &Config,

@@ -8,14 +8,19 @@ use serde_json::{Value, json};
 use crate::backend::{CallError, Reply, Request, http_error};
 use crate::types::EpisodeStatus;
 
+/// Chat completions endpoint.
 const URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 
+/// OpenRouter client.
 pub struct Client {
+    /// HTTP client with the run's timeout.
     http: reqwest::Client,
+    /// `OPENROUTER_API_KEY`.
     api_key: String,
 }
 
 impl Client {
+    /// A client for one API key.
     pub fn new(api_key: String, timeout: Duration) -> Result<Client> {
         let http = reqwest::Client::builder().timeout(timeout).build()?;
         Ok(Client { http, api_key })

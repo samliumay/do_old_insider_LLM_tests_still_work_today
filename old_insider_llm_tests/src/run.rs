@@ -13,27 +13,45 @@ use crate::hash::git_state;
 use crate::types::{Api, EpisodeStatus, Phase, StimulusSet};
 use crate::{ollama, openrouter};
 
+/// Options of the `run` command.
 pub struct RunArgs {
+    /// Model id from `config.toml` (new runs).
     pub model: Option<String>,
+    /// Why the run is made (new runs).
     pub phase: Option<Phase>,
+    /// Stimulus set to run.
     pub set: StimulusSet,
+    /// Samples per condition; default from `config.toml`.
     pub samples: Option<u32>,
+    /// Run id to continue.
     pub resume: Option<String>,
+    /// Run despite uncommitted changes.
     pub allow_dirty: bool,
 }
 
+/// One condition × sample to run.
 struct Job {
+    /// Stimulus row id.
     stimulus_id: i64,
+    /// For log lines.
     condition_id: String,
+    /// System prompt.
     system: String,
+    /// User message, joined as Anthropic's runner does.
     user: String,
+    /// Sample index, from 0.
     sample: i32,
 }
 
+/// How a job ended after all attempts.
 struct Outcome {
+    /// Last reply, if any call returned one.
     reply: Option<Reply>,
+    /// Why it failed, if it did.
     error: Option<String>,
+    /// Calls made.
     attempts: i32,
+    /// Wall time over all attempts.
     duration: Duration,
 }
 
@@ -51,6 +69,7 @@ fn backend(cfg: &Config, api: Api) -> Result<Backend> {
     })
 }
 
+/// Start or resume a run and store every episode. Returns the run id.
 pub async fn run(pool: &PgPool, cfg: &Config, args: RunArgs) -> Result<String> {
     let (run_id, model, provider, set, samples, client) = match &args.resume {
         Some(id) => resume_run(pool, cfg, id).await?,
@@ -171,8 +190,10 @@ pub async fn run(pool: &PgPool, cfg: &Config, args: RunArgs) -> Result<String> {
     Ok(run_id)
 }
 
+/// Run id, model, pin, set, samples and the client of a started run.
 type Started = (String, String, String, StimulusSet, u32, Backend);
 
+/// Check the pin and the git trees, then insert the run row.
 async fn new_run(pool: &PgPool, cfg: &Config, args: &RunArgs) -> Result<Started> {
     let (Some(model_id), Some(phase)) = (&args.model, args.phase) else {
         bail!("a new run needs --model and --phase");
@@ -223,6 +244,7 @@ async fn new_run(pool: &PgPool, cfg: &Config, args: &RunArgs) -> Result<Started>
     Ok((run_id, m.id.clone(), pin, args.set, samples, client))
 }
 
+/// Reload a run; its config and pin must be unchanged.
 async fn resume_run(pool: &PgPool, cfg: &Config, run_id: &str) -> Result<Started> {
     let Some(r) = sqlx::query(
         "SELECT model, api, provider, stimulus_set, samples, config_sha256 FROM runs WHERE run_id = $1",
@@ -323,6 +345,7 @@ async fn call_with_retries(
     }
 }
 
+/// Insert the episode row and return its status.
 async fn store(pool: &PgPool, run_id: &str, job: &Job, o: &Outcome) -> Result<EpisodeStatus> {
     let status = o.reply.as_ref().map_or(EpisodeStatus::Failed, |r| {
         if o.error.is_some() {

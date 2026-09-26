@@ -10,12 +10,16 @@ use serde_json::{Value, json};
 use crate::backend::{CallError, Reply, Request, http_error};
 use crate::types::EpisodeStatus;
 
+/// Ollama client.
 pub struct Client {
+    /// HTTP client with the run's timeout.
     http: reqwest::Client,
+    /// Server address without a trailing slash.
     base_url: String,
 }
 
 impl Client {
+    /// A client for one server.
     pub fn new(base_url: &str, timeout: Duration) -> Result<Client> {
         let http = reqwest::Client::builder().timeout(timeout).build()?;
         Ok(Client {
@@ -55,6 +59,7 @@ impl Client {
         Ok(())
     }
 
+    /// Send one chat call with thinking on.
     pub async fn complete(&self, req: &Request<'_>) -> Result<Reply, CallError> {
         let mut options = json!({"temperature": req.temperature, "num_predict": req.max_tokens});
         if let Some(seed) = req.seed {

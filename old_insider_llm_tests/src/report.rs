@@ -13,22 +13,33 @@ use crate::types::{EpisodeStatus, EvalAware, Scenario};
 
 /// One non-failed episode with its label under the current judge and prompt (if any).
 pub struct EpisodeRow {
+    /// Scenario of the stimulus.
     pub scenario: Scenario,
+    /// Ok or truncated (failed episodes are not reported).
     pub status: EpisodeStatus,
+    /// Verdict, if judged.
     pub label: Option<EvalAware>,
 }
 
+/// Tallies for one table row.
 #[derive(Default, Debug, PartialEq)]
 pub struct Counts {
+    /// Non-failed episodes.
     pub episodes: usize,
+    /// Of those, cut off at the token budget.
     pub truncated: usize,
+    /// Episodes with a verdict.
     pub judged: usize,
+    /// Verdict `none`.
     pub none: usize,
+    /// Verdict `suspected`.
     pub suspected: usize,
+    /// Verdict `explicit`.
     pub explicit: usize,
 }
 
 impl Counts {
+    /// Count one episode.
     pub fn add(&mut self, row: &EpisodeRow) {
         self.episodes += 1;
         match row.status {
@@ -51,6 +62,7 @@ impl Counts {
     }
 }
 
+/// `k/n (p%)`, or a dash when `n` is 0.
 pub fn rate(k: usize, n: usize) -> String {
     if n == 0 {
         "—".to_string()
@@ -72,6 +84,7 @@ pub fn aggregate(rows: &[EpisodeRow]) -> (Counts, BTreeMap<&'static str, Counts>
     (total, by)
 }
 
+/// A counts table for the terminal (`markdown = false`) or `report.md`.
 fn counts_table(first: &str, rows: Vec<(String, &Counts)>, markdown: bool) -> Table {
     let mut t = Table::new();
     t.load_style(if markdown {
@@ -104,6 +117,7 @@ fn counts_table(first: &str, rows: Vec<(String, &Counts)>, markdown: bool) -> Ta
     t
 }
 
+/// Print and write the report of the given runs (all runs if none).
 pub async fn report(pool: &PgPool, cfg: &Config, runs: &[String]) -> Result<()> {
     let prompt = Prompt::load(&cfg.benchmark_dir)?;
     let schema: Option<i64> = sqlx::query_scalar("SELECT max(version) FROM _sqlx_migrations")
@@ -216,6 +230,7 @@ pub async fn report(pool: &PgPool, cfg: &Config, runs: &[String]) -> Result<()> 
     Ok(())
 }
 
+/// The first 12 characters (hashes in headers).
 fn short(s: &str) -> &str {
     &s[..s.len().min(12)]
 }

@@ -8,14 +8,21 @@ use crate::config::{ModelConfig, ModelSource};
 use crate::types::{Api, EpisodeStatus};
 use crate::{ollama, openrouter};
 
+/// One chat call to a subject model.
 pub struct Request<'a> {
+    /// Model id at its API.
     pub model: &'a str,
     /// OpenRouter: pinned provider tag. Ollama: unused (the digest is checked before the run).
     pub pin: &'a str,
+    /// System prompt.
     pub system: &'a str,
+    /// User message.
     pub user: &'a str,
+    /// Sampling temperature.
     pub temperature: f64,
+    /// Output budget, reasoning included.
     pub max_tokens: u32,
+    /// Seed, if the run sends one.
     pub seed: Option<u64>,
 }
 
@@ -23,17 +30,29 @@ pub struct Request<'a> {
 /// `stop` → ok, `length` → truncated, anything else (incl. `error`) → failed.
 #[derive(Debug)]
 pub struct Reply {
+    /// Ok, truncated or failed.
     pub status: EpisodeStatus,
+    /// The final answer text.
     pub answer: Option<String>,
+    /// The raw reasoning trace.
     pub reasoning: Option<String>,
+    /// Finish reason as the API reported it.
     pub finish_reason: Option<String>,
+    /// Provider that served the call.
     pub served_by: Option<String>,
+    /// Model id the API reported back.
     pub api_model: Option<String>,
+    /// Input tokens.
     pub prompt_tokens: Option<i32>,
+    /// Output tokens, reasoning included.
     pub completion_tokens: Option<i32>,
+    /// Reasoning tokens, where reported.
     pub reasoning_tokens: Option<i32>,
+    /// Cost in USD, where reported.
     pub cost_usd: Option<f64>,
+    /// Why the call failed, if it did.
     pub error: Option<String>,
+    /// The full response body.
     pub raw: Value,
 }
 
@@ -65,12 +84,16 @@ pub fn http_error(status: reqwest::StatusCode, body: &str) -> CallError {
     }
 }
 
+/// The client for a model's API.
 pub enum Backend {
+    /// OpenRouter, provider pinned.
     OpenRouter(openrouter::Client),
+    /// Ollama, digest pinned.
     Ollama(ollama::Client),
 }
 
 impl Backend {
+    /// Which API this client talks to.
     pub fn api(&self) -> Api {
         match self {
             Backend::OpenRouter(_) => Api::OpenRouter,
@@ -97,6 +120,7 @@ impl Backend {
         }
     }
 
+    /// Send one chat call.
     pub async fn complete(&self, req: &Request<'_>) -> Result<Reply, CallError> {
         match self {
             Backend::OpenRouter(c) => c.complete(req).await,
@@ -105,6 +129,7 @@ impl Backend {
     }
 }
 
+/// The first `n` characters of `s` (for log lines).
 pub fn truncate(s: &str, n: usize) -> &str {
     match s.char_indices().nth(n) {
         Some((i, _)) => &s[..i],
