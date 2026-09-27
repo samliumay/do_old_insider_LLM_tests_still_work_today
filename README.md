@@ -39,6 +39,25 @@ Needs Docker, Rust (edition 2024), and the benchmark repo cloned next to this on
 
 One file, `old_insider_llm_tests/config.toml`, for every model: temperature 1.0, token budget, samples, retries, seed, the judge model, and the model list. Each model is pinned: an OpenRouter model to one provider (fallbacks off), an Ollama model to its manifest digest. The runner checks the pin before a run starts.
 
+## Layout
+
+```
+old_insider_llm_tests/src/
+├── main.rs            # CLI; each subcommand calls one function in commands/
+├── lib.rs             # module list, crate docs, doc lints
+├── config.rs  types.rs  db.rs  stimuli.rs
+├── models.rs          # Request / Reply / CallError, Backend enum + dispatch
+├── models/            # one file per model API: openrouter.rs, ollama.rs
+├── judges.rs          # Prompt, fill, tag parsing, retry loop
+├── judges/            # gemini.rs (client), eval_aware.rs (test-awareness judge)
+├── commands.rs
+├── commands/          # load.rs, run.rs, judge_aware.rs, report.rs
+├── util.rs
+└── util/              # hash.rs, git.rs, text.rs
+```
+
+A parent file holds the shared types and the dispatch; its folder holds one unit per file (no `mod.rs`). A new model API or judge is one new file plus a line in the parent. Details: `../docs/code_documentation.md`.
+
 ## Status
 
 Milestone 1 (database, runner, awareness judge, report). Harm classifiers and the renamed stimulus set are next.

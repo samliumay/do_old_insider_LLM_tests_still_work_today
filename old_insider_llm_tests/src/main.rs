@@ -7,9 +7,10 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+use old_insider_llm_tests::commands::{judge_aware, load, report, run};
 use old_insider_llm_tests::config::Config;
-use old_insider_llm_tests::types::{Phase, StimulusSet};
-use old_insider_llm_tests::{db, judge, report, run, stimuli};
+use old_insider_llm_tests::db;
+use old_insider_llm_tests::types::Phase;
 
 /// Command-line arguments.
 #[derive(Parser)]
@@ -69,11 +70,6 @@ enum Command {
     },
 }
 
-/// A required environment variable, with a hint where to set it.
-fn env(name: &str) -> Result<String> {
-    std::env::var(name).with_context(|| format!("{name} is not set (add it to ../.env)"))
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -86,17 +82,7 @@ async fn main() -> Result<()> {
     let pool = db::connect().await?;
     match cli.command {
         Command::Migrate => println!("migrations applied"),
-        Command::Load { set } => {
-            let set: StimulusSet = set.parse()?;
-            let (source, list) = stimuli::read_set(&cfg.benchmark_dir, set)?;
-            let r = stimuli::load(&pool, &source, &list).await?;
-            println!(
-                "load {set}: {} conditions, {} new, {} unchanged",
-                list.len(),
-                r.inserted,
-                r.unchanged
-            );
-        }
+        Command::Load { set } => load::load(&pool, &cfg, &set).await?,
         Command::Run {
             model,
             phase,
@@ -115,9 +101,7 @@ async fn main() -> Result<()> {
             };
             run::run(&pool, &cfg, args).await?;
         }
-        Command::JudgeAware { runs } => {
-            judge::judge_aware(&pool, &cfg, env("GEMINI_API_KEY")?, &runs).await?
-        }
+        Command::JudgeAware { runs } => judge_aware::judge_aware(&pool, &cfg, &runs).await?,
         Command::Report { runs } => report::report(&pool, &cfg, &runs).await?,
     }
     Ok(())

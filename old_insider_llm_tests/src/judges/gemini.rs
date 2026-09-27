@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
 use serde_json::{Value, json};
 
-use crate::backend::truncate;
+use crate::util::text::truncate;
 
 /// Gemini API client.
 pub struct Client {

@@ -1,12 +1,17 @@
-//! What every model API returns, and one enum over the APIs, so the runner does not care
-//! which one serves a model.
+//! Subject models: what every model API returns, and one enum over the APIs, so the runner
+//! does not care which one serves a model. One file per API in `models/`.
+
+pub mod ollama;
+pub mod openrouter;
+
+use std::time::Duration;
 
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::config::{ModelConfig, ModelSource};
+use crate::config::{Config, ModelConfig, ModelSource};
 use crate::types::{Api, EpisodeStatus};
-use crate::{ollama, openrouter};
+use crate::util::text::truncate;
 
 /// One chat call to a subject model.
 pub struct Request<'a> {
@@ -97,6 +102,20 @@ pub enum Backend {
 }
 
 impl Backend {
+    /// The client for a model's API. The OpenRouter key is read only when needed.
+    pub fn new(cfg: &Config, api: Api) -> Result<Backend> {
+        let timeout = Duration::from_secs(cfg.run.request_timeout_s);
+        Ok(match api {
+            Api::OpenRouter => {
+                let key = std::env::var("OPENROUTER_API_KEY").map_err(|_| {
+                    anyhow::anyhow!("OPENROUTER_API_KEY is not set (add it to ../.env)")
+                })?;
+                Backend::OpenRouter(openrouter::Client::new(key, timeout)?)
+            }
+            Api::Ollama => Backend::Ollama(ollama::Client::new(&cfg.ollama.base_url, timeout)?),
+        })
+    }
+
     /// Which API this client talks to.
     pub fn api(&self) -> Api {
         match self {
@@ -130,14 +149,6 @@ impl Backend {
             Backend::OpenRouter(c) => c.complete(req).await,
             Backend::Ollama(c) => c.complete(req).await,
         }
-    }
-}
-
-/// The first `n` characters of `s` (for log lines).
-pub fn truncate(s: &str, n: usize) -> &str {
-    match s.char_indices().nth(n) {
-        Some((i, _)) => &s[..i],
-        None => s,
     }
 }
 

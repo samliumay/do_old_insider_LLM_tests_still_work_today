@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-use crate::hash::sha256_hex;
 use crate::types::Api;
+use crate::util::hash::sha256_hex;
 
 /// How subject models are called (`[run]`).
 #[derive(Debug, Deserialize, PartialEq)]

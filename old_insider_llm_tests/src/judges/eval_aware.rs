@@ -1,76 +1,23 @@
-//! `judge-aware`: the test-awareness label. The judge reads the full conversation: system
-//! prompt, user message, the model's reasoning and its answer.
+//! The test-awareness judge. It reads the full conversation: system prompt, user message,
+//! the model's reasoning and its answer.
 
 use std::path::Path;
-use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use futures::StreamExt;
 use sqlx::{PgPool, Row};
 
-use crate::backend::truncate;
+use super::{Prompt, ask, between, fill, gemini};
 use crate::config::Config;
-use crate::gemini;
-use crate::hash::sha256_parts;
 use crate::types::EvalAware;
+use crate::util::text::truncate;
 
-/// The judge prompt, read from `benchmark/labels/eval_aware/`.
-pub struct Prompt {
-    /// `system.md`: the judge's instructions.
-    pub system: String,
-    /// `user.md`: the message template with `{placeholders}`.
-    pub user_template: String,
-    /// Hash of both files; stored with every verdict as the prompt version.
-    pub sha256: String,
-}
+/// Folder of this judge's prompt under `benchmark/labels/`.
+pub const LABEL: &str = "eval_aware";
 
-impl Prompt {
-    /// Read both files and hash them.
-    pub fn load(benchmark_dir: &Path) -> Result<Prompt> {
-        let dir = benchmark_dir.join("labels/eval_aware");
-        let read = |f: &str| {
-            std::fs::read_to_string(dir.join(f))
-                .with_context(|| format!("reading {}", dir.join(f).display()))
-        };
-        let system = read("system.md")?;
-        let user_template = read("user.md")?;
-        let sha256 = sha256_parts(&[&system, &user_template]);
-        Ok(Prompt {
-            system,
-            user_template,
-            sha256,
-        })
-    }
-}
-
-/// Replace `{name}` placeholders in one left-to-right pass, so text inserted for one
-/// placeholder (a model answer containing "{answer}", say) is never substituted again.
-pub fn fill(template: &str, values: &[(&str, &str)]) -> String {
-    let mut out = String::with_capacity(template.len());
-    let mut rest = template;
-    'outer: while let Some(start) = rest.find('{') {
-        out.push_str(&rest[..start]);
-        let after = &rest[start..];
-        for (name, value) in values {
-            let key = format!("{{{name}}}");
-            if after.starts_with(&key) {
-                out.push_str(value);
-                rest = &after[key.len()..];
-                continue 'outer;
-            }
-        }
-        out.push('{');
-        rest = &after[1..];
-    }
-    out.push_str(rest);
-    out
-}
-
-/// Text between the last `open` and the next `close`, trimmed.
-fn between<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
-    let start = text.rfind(open)? + open.len();
-    let end = text[start..].find(close)? + start;
-    Some(text[start..end].trim())
+/// The test-awareness judge prompt.
+pub fn load_prompt(benchmark_dir: &Path) -> Result<Prompt> {
+    Prompt::load(benchmark_dir, LABEL)
 }
 
 /// Read `<label>` (last occurrence) and `<evidence>` from the judge's answer.
@@ -93,13 +40,8 @@ struct Item {
 }
 
 /// Label every non-failed episode that has no verdict for the current judge and prompt.
-pub async fn judge_aware(
-    pool: &PgPool,
-    cfg: &Config,
-    api_key: String,
-    runs: &[String],
-) -> Result<()> {
-    let prompt = Prompt::load(&cfg.benchmark_dir)?;
+pub async fn label(pool: &PgPool, cfg: &Config, api_key: String, runs: &[String]) -> Result<()> {
+    let prompt = load_prompt(&cfg.benchmark_dir)?;
     let model = cfg.judge.model.as_str();
     let rows = sqlx::query(
         "SELECT e.id, e.answer, e.reasoning, s.system_prompt, s.user_prompt, s.email_content
@@ -163,7 +105,7 @@ pub async fn judge_aware(
     let mut stream = futures::stream::iter(items.into_iter().map(|item| {
         let (client, prompt) = (&client, &prompt);
         async move {
-            let result = judge_one(client, cfg, model, prompt, &item.message).await;
+            let result = ask(client, cfg, model, prompt, &item.message, parse_verdict).await;
             (item.episode_id, result)
         }
     }))
@@ -173,7 +115,7 @@ pub async fn judge_aware(
     while let Some((episode_id, result)) = stream.next().await {
         n += 1;
         match result {
-            Ok((label, evidence, output)) => {
+            Ok(((label, evidence), output)) => {
                 sqlx::query(
                     "INSERT INTO aware_labels (episode_id, label, evidence, judge_model, prompt_sha256, judge_output)
                      VALUES ($1, $2, $3, $4, $5, $6)",
@@ -212,39 +154,9 @@ pub async fn judge_aware(
     Ok(())
 }
 
-/// One judge call; retries HTTP errors and unparseable answers.
-async fn judge_one(
-    client: &gemini::Client,
-    cfg: &Config,
-    model: &str,
-    prompt: &Prompt,
-    message: &str,
-) -> Result<(EvalAware, String, String)> {
-    let mut last = anyhow!("no attempt made");
-    for attempt in 0..=cfg.judge.max_retries {
-        match client.generate(model, &prompt.system, message).await {
-            Ok(text) => match parse_verdict(&text) {
-                Ok((label, evidence)) => return Ok((label, evidence, text)),
-                Err(e) => last = e.context(format!("judge output: {}", truncate(&text, 200))),
-            },
-            Err(e) => last = e,
-        }
-        if attempt < cfg.judge.max_retries {
-            tokio::time::sleep(Duration::from_secs((3 * 2u64.pow(attempt)).min(90))).await;
-        }
-    }
-    Err(last)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fill_does_not_resubstitute_inserted_text() {
-        let out = fill("A={a} B={b} C={c}", &[("a", "{b}"), ("b", "x")]);
-        assert_eq!(out, "A={b} B=x C={c}");
-    }
 
     #[test]
     fn parse_verdict_reads_label_and_evidence() {

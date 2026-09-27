@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 
-use crate::backend::{CallError, Reply, Request, http_error};
+use super::{CallError, Reply, Request, http_error};
 use crate::types::EpisodeStatus;
 
 /// Chat completions endpoint.

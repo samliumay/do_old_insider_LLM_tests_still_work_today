@@ -8,7 +8,7 @@ use comfy_table::{Table, presets};
 use sqlx::{PgPool, Row};
 
 use crate::config::Config;
-use crate::judge::Prompt;
+use crate::judges::eval_aware;
 use crate::types::{EpisodeStatus, EvalAware, Scenario};
 
 /// One non-failed episode with its label under the current judge and prompt (if any).
@@ -119,7 +119,7 @@ fn counts_table(first: &str, rows: Vec<(String, &Counts)>, markdown: bool) -> Ta
 
 /// Print and write the report of the given runs (all runs if none).
 pub async fn report(pool: &PgPool, cfg: &Config, runs: &[String]) -> Result<()> {
-    let prompt = Prompt::load(&cfg.benchmark_dir)?;
+    let prompt = eval_aware::load_prompt(&cfg.benchmark_dir)?;
     let schema: Option<i64> = sqlx::query_scalar("SELECT max(version) FROM _sqlx_migrations")
         .fetch_one(pool)
         .await?;

@@ -7,11 +7,11 @@ use anyhow::{Result, bail};
 use futures::StreamExt;
 use sqlx::{PgPool, Row};
 
-use crate::backend::{Backend, CallError, Reply, Request, truncate};
 use crate::config::{Config, ModelConfig, ModelSource};
-use crate::hash::git_state;
+use crate::models::{Backend, CallError, Reply, Request};
 use crate::types::{Api, EpisodeStatus, Phase, StimulusSet};
-use crate::{ollama, openrouter};
+use crate::util::git::git_state;
+use crate::util::text::truncate;
 
 /// Options of the `run` command.
 pub struct RunArgs {
@@ -53,20 +53,6 @@ struct Outcome {
     attempts: i32,
     /// Wall time over all attempts.
     duration: Duration,
-}
-
-/// The client for a model's API. The OpenRouter key is read only when needed.
-fn backend(cfg: &Config, api: Api) -> Result<Backend> {
-    let timeout = Duration::from_secs(cfg.run.request_timeout_s);
-    Ok(match api {
-        Api::OpenRouter => {
-            let key = std::env::var("OPENROUTER_API_KEY").map_err(|_| {
-                anyhow::anyhow!("OPENROUTER_API_KEY is not set (add it to ../.env)")
-            })?;
-            Backend::OpenRouter(openrouter::Client::new(key, timeout)?)
-        }
-        Api::Ollama => Backend::Ollama(ollama::Client::new(&cfg.ollama.base_url, timeout)?),
-    })
 }
 
 /// Start or resume a run and store every episode. Returns the run id.
@@ -201,7 +187,7 @@ async fn new_run(pool: &PgPool, cfg: &Config, args: &RunArgs) -> Result<Started>
         bail!("a new run needs --model and --phase");
     };
     let m = cfg.model(model_id)?;
-    let client = backend(cfg, m.api())?;
+    let client = Backend::new(cfg, m.api())?;
     // Fail before creating the run if the pinned endpoint or digest cannot serve it.
     let pin = client.check(m, cfg.run.max_tokens).await?;
     let (code_hash, code_dirty, bench_hash, bench_dirty) = ensure_clean(cfg, args.allow_dirty)?;
@@ -260,7 +246,7 @@ async fn resume_run(
         );
     }
     let api: Api = r.get::<String, _>("api").parse()?;
-    let client = backend(cfg, api)?;
+    let client = Backend::new(cfg, api)?;
     let source = match api {
         Api::OpenRouter => ModelSource::OpenRouter {
             provider: provider.clone(),

@@ -9,8 +9,8 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use sqlx::PgPool;
 
-use crate::hash::sha256_parts;
 use crate::types::{GoalType, Scenario, StimulusSet, UrgencyType};
+use crate::util::hash::sha256_parts;
 
 /// `condition.toml` as written.
 #[derive(Debug, Deserialize)]
